@@ -10,7 +10,8 @@ from pyspark.sql.functions import (
     hour,
     dayofweek,
     weekofyear,
-    from_unixtime
+    from_unixtime,
+    monotonically_increasing_id
 )
 
 
@@ -97,6 +98,7 @@ def process_log_data(spark, input_data, output_data):
 
     # extract columns to create time table
     time_table = log_df.select('start_time') \
+        .dropDuplicates() \
         .withColumn("hour", hour("start_time")) \
         .withColumn("day", dayofmonth("start_time")) \
         .withColumn("week", weekofyear("start_time")) \
@@ -105,7 +107,10 @@ def process_log_data(spark, input_data, output_data):
         .withColumn("weekday", dayofweek("start_time"))
 
     # write time table to parquet files partitioned by year and month
-    time_table.write.parquet(f"{output_data}/time")
+    time_table \
+        .write \
+        .partitionBy("year", "month") \
+        .parquet(f"{output_data}/time")
 
     # read in song data to use for songplays table
     song_data = f"{input_data}/song_data/*/*/*"
@@ -135,8 +140,17 @@ def process_log_data(spark, input_data, output_data):
         'inner'
     ).selectExpr(*songplay_cols)
 
+    # add 'songplay_id' columnn
+    songplays_table = songplays_table \
+        .withColumn('songplay_id', monotonically_increasing_id())
+
     # write songplays table to parquet files partitioned by year and month
-    songplays_table.write.parquet(f"{output_data}/songplays")
+    songplays_table \
+        .withColumn("year", year("start_time")) \
+        .withColumn("month", month("start_time")) \
+        .write \
+        .partitionBy("year", "month") \
+        .parquet(f"{output_data}/songplays")
 
 
 def main(conf):
